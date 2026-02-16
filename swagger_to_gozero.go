@@ -414,32 +414,42 @@ func generateServiceOp(path string, pathItemIf interface{}) (string, map[string]
 	return "default", nil, fmt.Errorf("no valid operations found in paths")
 }
 func generateServiceStatements(paths map[string]interface{}, schemas map[string]interface{}, allDepends map[string]APIDependency) (string, error) {
-	serviceName := "default"
-	formattedServiceName := capitalize(serviceName)
-	var prefix string
-	if strings.Contains(serviceName, "_") {
-		prefix = "/api/" + strings.ReplaceAll(strings.ToLower(serviceName), "_", "/")
-	} else {
-		prefix = "/api/" + strings.ToLower(serviceName)
+	if len(paths) == 0 {
+		return "", nil
 	}
-
-	serverLines := []string{
-		"@server(",
-		fmt.Sprintf("    prefix: %s", prefix),
-		fmt.Sprintf("    group: %s", formattedServiceName),
-		")",
-		fmt.Sprintf("service %s {", strings.ToLower(serviceName)),
-	}
+	serverLines := []string{}
 
 	for path, opInfo := range paths {
 		serviceName, opInfoMeta, err := generateServiceOp(path, opInfo)
 		if err != nil {
 			continue
 		}
-		_ = serviceName
 		method := opInfoMeta["method"].(string)
 		path = opInfoMeta["path"].(string)
 		op := opInfoMeta["operation"].(map[string]interface{})
+
+		if len(serverLines) == 0 {
+			pathParts := strings.Split(path, "/")
+			groupPrefix := ""
+			if len(pathParts) < 2 {
+				groupPrefix = "default"
+			} else {
+				groupPrefix = strings.Join(pathParts[0:len(pathParts)-2], "/")
+			}
+			if groupPrefix == "" {
+				groupPrefix = "default"
+			}
+			groupName := strings.TrimLeft(groupPrefix, "/")
+			serviceLine := []string{
+				"@server(",
+				fmt.Sprintf("    prefix: %s", groupPrefix),
+				fmt.Sprintf("    group: %s", groupName),
+				")",
+				fmt.Sprintf("service %s {", strings.ToLower(serviceName)),
+			}
+			serverLines = append(serverLines, serviceLine...)
+
+		}
 
 		handlerName := generateHandlerName(method, path, op)
 
