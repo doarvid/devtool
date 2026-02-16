@@ -437,7 +437,7 @@ func generateServiceStatements(paths map[string]interface{}, schemas map[string]
 				groupPrefix = strings.Join(pathParts[0:len(pathParts)-2], "/")
 			}
 			if groupPrefix == "" {
-				groupPrefix = "default"
+				groupPrefix = "/"
 			}
 			groupName := strings.TrimLeft(groupPrefix, "/")
 			serviceLine := []string{
