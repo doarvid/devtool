@@ -1,13 +1,13 @@
-package main
+package swagger
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -20,19 +20,16 @@ var goKeywords = map[string]bool{
 	"continue": true, "for": true, "import": true, "return": true, "var": true,
 }
 
-func main() {
-	var output string
-	var group bool
-	flag.StringVar(&output, "o", "output.api", "output file or directory")
-	flag.BoolVar(&group, "g", true, "group paths by prefix and create multiple files")
-	flag.Parse()
+type Config struct {
+	Title        string            `json:"title"`
+	Version      string            `json:"version"`
+	PathGroup    map[string]string `json:"pathGroup"`
+	defaultGroup string            `json:"defaultGroup"`
+}
 
-	if flag.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: swagger2gozero [-o output] [-g] input.json")
-		os.Exit(1)
-	}
-	inputFile := flag.Arg(0)
+var defaultConfig = Config{}
 
+func Main(output string, cfgFile string, group bool, inputFile string) {
 	data, err := ioutil.ReadFile(inputFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
@@ -44,6 +41,18 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
 		os.Exit(1)
+	}
+	if cfgFile != "" {
+		cfgData, err := ioutil.ReadFile(cfgFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading config file: %v\n", err)
+			os.Exit(1)
+		}
+		err = json.Unmarshal(cfgData, &defaultConfig)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing config JSON: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if group {
@@ -64,7 +73,7 @@ func main() {
 		}
 		fmt.Printf("Successfully converted %s to files in %s\n", inputFile, outputDir)
 	} else {
-		content, err := generateAPIContent(swagger, nil, nil)
+		content, err := generateAPIContent(swagger, nil, nil, nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating API: %v\n", err)
 			os.Exit(1)
@@ -111,21 +120,37 @@ func parseSwagger(swagger map[string]interface{}) *ParsedSwagger {
 	return parsed
 }
 
+func getGroupPathFromPath(path string) string {
+	components := strings.Split(path, "/")
+	groupPath := ""
+	if len(components) < 2 {
+		groupPath = "default"
+	} else {
+		groupPath = strings.Join(components[:len(components)-1], "/")
+	}
+	for k, v := range defaultConfig.PathGroup {
+		//fmt.Printf("test group %v=>%v\n", groupPath, k)
+		if strings.HasPrefix(groupPath, k) {
+			t := strings.ReplaceAll(groupPath, k, v)
+			//fmt.Printf("match group %v=>%v=>%s\n", groupPath, k, t)
+			return t
+		}
+	}
+	if defaultConfig.defaultGroup != "" {
+		target := defaultConfig.defaultGroup + "/" + strings.TrimPrefix(groupPath, "/")
+		fmt.Printf("path:%v->%s\n", path, target)
+		return target
+	}
+	fmt.Printf("path:%v->%s\n", path, groupPath)
+	return groupPath
+}
+
 func groupPathsByService(paths map[string]interface{}) map[string]map[string]interface{} {
 	groups := make(map[string]map[string]interface{})
 	groups["default"] = make(map[string]interface{})
 
 	for path, pathItem := range paths {
-		normalized := strings.TrimPrefix(path, "/")
-		components := strings.Split(normalized, "/")
-
-		var groupPath string
-		if len(components) < 2 {
-			groupPath = "default"
-		} else {
-			serviceIdx := len(components) - 2
-			groupPath = strings.Join(components[:serviceIdx+1], "/")
-		}
+		groupPath := getGroupPathFromPath(path)
 		if _, ok := groups[groupPath]; !ok {
 			groups[groupPath] = make(map[string]interface{})
 		}
@@ -186,14 +211,12 @@ func swaggerTypeToGoZeroType(typ, format string) string {
 }
 
 type NameSimplifier struct {
-	used map[string]bool
 }
 
 func NewNameSimplifier() *NameSimplifier {
-	return &NameSimplifier{used: make(map[string]bool)}
+	return &NameSimplifier{}
 }
-
-func (ns *NameSimplifier) Simplify(typeName string) string {
+func (ns *NameSimplifier) Simplify(typeName string, refNameStat map[string]int) string {
 	parts := strings.Split(typeName, ".")
 	base := parts[len(parts)-1]
 
@@ -203,41 +226,16 @@ func (ns *NameSimplifier) Simplify(typeName string) string {
 			unique.WriteString(capitalize(p))
 		}
 		name := unique.String()
-		if !ns.used[name] {
-			ns.used[name] = true
-			return name
-		}
+		return name
 	}
-	if !ns.used[base] {
-		ns.used[base] = true
-		return base
+	if len(parts) == 1 {
+		return capitalize(base)
 	}
-	if len(parts) > 1 {
-		lastTwo := capitalize(parts[len(parts)-2]) + capitalize(parts[len(parts)-1])
-		if !ns.used[lastTwo] {
-			ns.used[lastTwo] = true
-			return lastTwo
-		}
-		for i := 3; i <= len(parts); i++ {
-			var combined strings.Builder
-			for j := len(parts) - i; j < len(parts); j++ {
-				combined.WriteString(capitalize(parts[j]))
-			}
-			name := combined.String()
-			if !ns.used[name] {
-				ns.used[name] = true
-				return name
-			}
-		}
-	}
-	counter := 2
-	for {
-		name := fmt.Sprintf("%s%d", base, counter)
-		if !ns.used[name] {
-			ns.used[name] = true
-			return name
-		}
-		counter++
+	if v, ok := refNameStat[base]; ok && v > 1 {
+		lastTwo := capitalize(parts[len(parts)-2]) + capitalize(base)
+		return lastTwo
+	} else {
+		return capitalize(base)
 	}
 }
 
@@ -253,15 +251,20 @@ func capitalize(s string) string {
 // Type declaration generation
 // --------------------------------------------------------------------
 
-func generateTypeDeclarations(schemas map[string]interface{}, simplifier *NameSimplifier) (string, map[string]string, error) {
+func generateTypeDeclarations(schemas map[string]interface{}, refNameStat map[string]int, dumpTypes map[string]bool) (string, map[string]string, error) {
 	var allLines, nestedLines []string
 	nameMap := make(map[string]string)
 	for name := range schemas {
-		nameMap[name] = simplifier.Simplify(name)
+		simplifier := NewNameSimplifier()
+		nameMap[name] = simplifier.Simplify(name, refNameStat)
 	}
-
-	for origName, schemaIf := range schemas {
-		schema, ok := schemaIf.(map[string]interface{})
+	sortedOrigNames := make([]string, 0)
+	for origName := range schemas {
+		sortedOrigNames = append(sortedOrigNames, origName)
+	}
+	sort.Strings(sortedOrigNames)
+	for _, origName := range sortedOrigNames {
+		schema, ok := schemas[origName].(map[string]interface{})
 		if !ok {
 			continue
 		}
@@ -272,10 +275,20 @@ func generateTypeDeclarations(schemas map[string]interface{}, simplifier *NameSi
 			continue
 		}
 		simpleName := nameMap[origName]
-
+		if _, ok := dumpTypes[simpleName]; ok {
+			continue
+		}
+		dumpTypes[simpleName] = true
+		fmt.Printf("+ Type: %s\n", simpleName)
 		lines := []string{fmt.Sprintf("type %s {", simpleName)}
 		if props, ok := schema["properties"].(map[string]interface{}); ok {
-			for propName, propIf := range props {
+			var propNames []string
+			for propName := range props {
+				propNames = append(propNames, propName)
+			}
+			sort.Strings(propNames)
+			for _, propName := range propNames {
+				propIf := props[propName]
 				prop, ok := propIf.(map[string]interface{})
 				if !ok {
 					continue
@@ -322,6 +335,7 @@ func generateTypeDeclarations(schemas map[string]interface{}, simplifier *NameSi
 								tags := fmt.Sprintf("`json:\"%s\"`", subName)
 								nestedFields = append(nestedFields, fmt.Sprintf("    %s %s %s", capitalize(subName), subType, tags))
 							}
+							sort.Strings(nestedFields)
 							nestedDef += "\n" + strings.Join(nestedFields, "\n") + "\n}"
 							nestedLines = append(nestedLines, nestedDef, "")
 							goType = nestedName
@@ -341,6 +355,7 @@ func generateTypeDeclarations(schemas map[string]interface{}, simplifier *NameSi
 						}
 					}
 				}
+				fmt.Printf("++ %s %s %s\n", capitalize(propName), goType, tags)
 				lines = append(lines, fmt.Sprintf("    %s %s %s", capitalize(propName), goType, tags))
 			}
 		}
@@ -418,8 +433,14 @@ func generateServiceStatements(paths map[string]interface{}, schemas map[string]
 		return "", nil
 	}
 	serverLines := []string{}
+	sortedPaths := make([]string, 0, len(paths))
+	for path := range paths {
+		sortedPaths = append(sortedPaths, path)
+	}
+	sort.Strings(sortedPaths)
 
-	for path, opInfo := range paths {
+	for _, path := range sortedPaths {
+		opInfo := paths[path]
 		serviceName, opInfoMeta, err := generateServiceOp(path, opInfo)
 		if err != nil {
 			continue
@@ -429,17 +450,11 @@ func generateServiceStatements(paths map[string]interface{}, schemas map[string]
 		op := opInfoMeta["operation"].(map[string]interface{})
 
 		if len(serverLines) == 0 {
-			pathParts := strings.Split(path, "/")
-			groupPrefix := ""
-			if len(pathParts) < 2 {
-				groupPrefix = "default"
-			} else {
-				groupPrefix = strings.Join(pathParts[0:len(pathParts)-2], "/")
-			}
-			if groupPrefix == "" {
-				groupPrefix = "/"
-			}
+			groupPrefix := getGroupPathFromPath(path)
 			groupName := strings.TrimLeft(groupPrefix, "/")
+			if groupName == "" {
+				groupName = "default"
+			}
 			serviceLine := []string{
 				"@server(",
 				fmt.Sprintf("    prefix: %s", groupPrefix),
@@ -605,7 +620,7 @@ type APIDependency struct {
 	nameMap     map[string]string
 }
 
-func generateAPIContent(swagger map[string]interface{}, paths map[string]interface{}, schemas map[string]interface{}) (string, error) {
+func generateAPIContent(swagger map[string]interface{}, paths map[string]interface{}, schemas map[string]interface{}, refNameStat map[string]int) (string, error) {
 	parsed := parseSwagger(swagger)
 	if paths == nil {
 		paths = parsed.Paths
@@ -613,9 +628,18 @@ func generateAPIContent(swagger map[string]interface{}, paths map[string]interfa
 	if schemas == nil {
 		schemas = parsed.Schemas
 	}
+	apiRefNameStat := make(map[string]int)
 	allDepends := make(map[string]APIDependency)
 	var collect func(string)
 	collect = func(refName string) {
+		shortRefName := lastPartOfRef(refName)
+		shortRefNameParts := strings.Split(shortRefName, ".")
+		shortRefName = shortRefNameParts[len(shortRefNameParts)-1]
+		if v, ok := apiRefNameStat[shortRefName]; ok {
+			apiRefNameStat[shortRefName] = v + 1
+		} else {
+			apiRefNameStat[shortRefName] = 1
+		}
 		v, ok := allDepends[refName]
 		if ok {
 			collectDependentSchemas(refName, schemas, v.usedSchemas, v.visited)
@@ -697,11 +721,17 @@ func generateAPIContent(swagger map[string]interface{}, paths map[string]interfa
 		}
 	}
 
-	simplifier := NewNameSimplifier()
 	var allTypeDecls []string
-	for depName, dep := range allDepends {
+	var depNames []string
+	for depName := range allDepends {
+		depNames = append(depNames, depName)
+	}
+	sort.Strings(depNames)
+	dumpTypes := make(map[string]bool)
+	for _, depName := range depNames {
+		dep := allDepends[depName]
 		allTypeDecls = append(allTypeDecls, "// Types for "+depName)
-		typeDecl, nameMap, err := generateTypeDeclarations(dep.usedSchemas, simplifier)
+		typeDecl, nameMap, err := generateTypeDeclarations(dep.usedSchemas, refNameStat, dumpTypes)
 		if err != nil {
 			return "", err
 		}
@@ -797,6 +827,26 @@ func collectDependentSchemas(schemaName string, allSchemas map[string]interface{
 	}
 }
 
+func statRefNames(schemas map[string]interface{}) map[string]int {
+	refNameStat := make(map[string]int)
+	for schemaKey := range schemas {
+		parts := strings.Split(schemaKey, ".")
+		base := parts[len(parts)-1]
+		if v, ok := refNameStat[base]; ok {
+			refNameStat[base] = v + 1
+		} else {
+			refNameStat[base] = 1
+		}
+	}
+	for k, v := range refNameStat {
+		if v <= 1 {
+			continue
+		}
+		fmt.Printf("ref name:%s count:%d\n", k, v)
+	}
+	return refNameStat
+}
+
 // --------------------------------------------------------------------
 // Grouped file generation
 // --------------------------------------------------------------------
@@ -809,6 +859,7 @@ func generateGroupedFiles(swagger map[string]interface{}, outputDir string) erro
 		return err
 	}
 
+	refNameStat := statRefNames(parsed.Schemas)
 	for groupPath, groupPathData := range groups {
 		parts := strings.Split(groupPath, "/")
 		servicePath := parts[:len(parts)-1]
@@ -820,7 +871,7 @@ func generateGroupedFiles(swagger map[string]interface{}, outputDir string) erro
 
 		serviceName = sanitizeIdentifier(strings.ToLower(serviceName))
 		filePath := filepath.Join(fullDir, serviceName+".api")
-		content, err := generateAPIContent(swagger, groupPathData, parsed.Schemas)
+		content, err := generateAPIContent(swagger, groupPathData, parsed.Schemas, refNameStat)
 		if err != nil {
 			return err
 		}

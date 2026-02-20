@@ -1,0 +1,31 @@
+{
+    "title":"hotgo",
+    "version":"1.0.0",
+    "description":"hotgo",
+    "pathGroup":{
+        "/admin/dept":"/admin/orginazation/dept",
+        "/admin/post":"/admin/orginazation/post",
+        "/admin/member":"/admin/orginazation/member",
+        "/admin/menu":"/admin/permission/menu",
+        "/admin/role":"/admin/permission/role",
+        "/admin/monitor":"/admin/system/monitor/monitor",
+        "/admin/serveLog":"/admin/system/monitor/log/servelog",
+        "/admin/log":"/admin/system/monitor/log/log",   
+        "/admin/smslog":"/admin/system/monitor/log/smslog",   
+        "/admin/loginlog":"/admin/system/monitor/log/loginlog",
+        "/admin/creditsLog":"/admin/system/monitor/log/creditslog",
+        "/admin/provinces":"/admin/system/app/provinces",
+        "/admin/notice":"/admin/system/app/notice",
+        "/admin/site":"/admin/system/config/site",
+        "/admin/sms":"/admin/system/config/sms",
+        "/admin/dictdata":"/admin/system/dictdata",
+        "/admin/wechat":"/admin/system/config/wechat",    
+        "/admin/serveLicense":"/admin/system/config/license",
+        "/admin/blacklist":"/admin/system/config/blacklist",
+        "/admin/cron":"/admin/system/config/cron",
+        "/admin/crongroup":"/admin/system/config/cron",
+        "/admin/dictType":"/admin/system/config/dicttype",
+        "/admin/dictDype":"/admin/system/config/dictdata"
+    },
+    "defaultGroup":"default"
+}

@@ -1,0 +1,19 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "name": "swagger_to_gozero",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/swagger_to_gozero.go",
+            "args": [
+                "-o", "${workspaceFolder}/xxxx","-f","hotgo.json","${workspaceFolder}/swagger_json_to_zero_api/api.json"
+            ]
+        }
+    ]
+}
